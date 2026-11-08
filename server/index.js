@@ -267,11 +267,17 @@ function makeServer() {
       }
     },
     async (args) => {
+      const regday = args.date || new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Seoul",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(new Date());
       const data = await kamisRequest("dailyPriceByCategoryList", {
         p_product_cls_code: args.product_class,
         p_item_category_code: args.category_code,
         p_country_code: args.region_code,
-        p_regday: args.date,
+        p_regday: regday,
         p_convert_kg_yn: "Y"
       });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
