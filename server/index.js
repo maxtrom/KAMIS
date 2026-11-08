@@ -17,6 +17,57 @@ function credentials() {
   return { certId, certKey };
 }
 
+function sanitizeKamisData(value) {
+  const { certId, certKey } = credentials();
+  const secretStrings = [certId, certKey].filter(Boolean);
+  const walk = (input, key = "") => {
+    if (/^condition$/i.test(key) || /cert.?key|cert.?id/i.test(key)) return undefined;
+    if (Array.isArray(input)) return input.map((v) => walk(v)).filter((v) => v !== undefined);
+    if (input && typeof input === "object") {
+      const out = {};
+      for (const [k, v] of Object.entries(input)) {
+        const cleaned = walk(v, k);
+        if (cleaned !== undefined) out[k] = cleaned;
+      }
+      return out;
+    }
+    if (typeof input === "string") {
+      return secretStrings.reduce((s, secret) => s.split(secret).join("[REDACTED]"), input);
+    }
+    return input;
+  };
+  return walk(value);
+}
+
+function normalizeName(value) {
+  return String(value ?? "").replace(/\\s+/g, "").replace(/[·ㆍ]/g, "").toLowerCase();
+}
+
+async function resolveKamisItemCode(cropName, categoryCode = "200") {
+  const listing = await kamisRequest("dailyPriceByCategoryList", {
+    p_product_cls_code: "02",
+    p_item_category_code: categoryCode,
+    p_convert_kg_yn: "Y"
+  });
+  const rows = Array.isArray(listing?.data) ? listing.data : [];
+  const matches = rows.filter((row) => {
+    const name = row.item_name ?? row.itemName ?? row.itemname ?? "";
+    return normalizeName(name) === normalizeName(cropName);
+  });
+  if (matches.length !== 1) {
+    const available = rows.map((row) => ({
+      item_name: row.item_name ?? row.itemName ?? row.itemname ?? null,
+      item_code: row.itemcode ?? row.item_code ?? row.itemCode ?? null
+    })).filter((row) => row.item_name);
+    throw new Error(matches.length
+      ? `품목명 '${cropName}'의 코드가 여러 개입니다. 품종을 지정해야 합니다.`
+      : `KAMIS 품목 목록에서 '${cropName}'을(를) 찾지 못했습니다. 품목코드표를 확인하세요. 반환된 품목 수: ${rows.length}`);
+  }
+  const code = matches[0].itemcode ?? matches[0].item_code ?? matches[0].itemCode;
+  if (!code) throw new Error(`KAMIS 품목 '${cropName}' 응답에 품목코드가 없습니다.`);
+  return String(code);
+}
+
 async function kamisRequest(action, params = {}) {
   const { certId, certKey } = credentials();
   const url = new URL(API_URL);
@@ -55,7 +106,7 @@ function makeServer() {
         year: z.string().regex(/^\d{4}$/).describe("조회 연도 예: 2026"),
         period: z.string().default("1").describe("조회 기간(년), 기본 1"),
         category_code: z.string().default("200").describe("부류 코드: 100 식량작물, 200 채소류, 300 특용작물, 400 과일류, 500 축산물, 600 수산물"),
-        item_code: z.string().optional().describe("품목 코드"),
+        item_code: z.string().optional().describe("품목 코드. crop_name을 입력하면 KAMIS 품목목록에서 자동 확인합니다."),\n        crop_name: z.string().optional().describe("품목명(예: 양파, 대파, 양배추). item_code 대신 지정 가능"),
         kind_code: z.string().optional().describe("품종 코드"),
         grade_rank: z.string().optional().describe("등급 코드: 상품/중품 등 KAMIS 코드표 기준"),
         county_code: z.string().optional().describe("지역 코드. 미입력 시 전체 지역"),
@@ -68,7 +119,7 @@ function makeServer() {
         p_yyyy: args.year,
         p_period: args.period,
         p_itemcategorycode: args.category_code,
-        p_itemcode: args.item_code,
+        p_itemcode: resolvedItemCode,
         p_kindcode: args.kind_code,
         p_graderank: args.grade_rank,
         p_countycode: args.county_code,
