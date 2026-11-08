@@ -44,13 +44,12 @@ function normalizeName(value) {
 }
 
 async function resolveKamisItemCode(cropName, categoryCode = "200") {
-  // KAMIS official dailySalesList exposes the item names and product numbers.
   const listing = await kamisRequest("dailySalesList");
   const prices = Array.isArray(listing?.price) ? listing.price : [];
   const matches = prices.filter((row) => {
     const name = row.item_name ?? row.productName ?? row.productname ?? "";
     const category = String(row.category_code ?? row.categorycode ?? "");
-    return normalizeName(name) === normalizeName(cropName)
+    return normalizeName(name).includes(normalizeName(cropName))
       && (!category || category === String(categoryCode));
   });
   if (matches.length !== 1) {
@@ -60,7 +59,7 @@ async function resolveKamisItemCode(cropName, categoryCode = "200") {
       category_code: row.category_code ?? row.categorycode ?? null
     })).filter((row) => row.item_name);
     throw new Error(matches.length
-      ? `품목명 '${cropName}'의 코드가 여러 개입니다. KAMIS 품목코드표에서 부류/품종을 추가로 지정해야 합니다.`
+      ? `품목명 '${cropName}'에 해당하는 코드가 여러 개입니다. 더 구체적인 품목명을 지정하세요.`
       : `KAMIS 최근 품목목록에서 '${cropName}'을(를) 찾지 못했습니다. 반환된 품목 수: ${available.length}`);
   }
   const code = matches[0].productno ?? matches[0].itemcode ?? matches[0].item_code;
