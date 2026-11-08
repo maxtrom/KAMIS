@@ -145,6 +145,36 @@ function makeServer() {
   );
 
   server.registerTool(
+    "kamis_item_codes",
+    {
+      title: "KAMIS 품목코드 목록 조회",
+      description: "KAMIS 최근 품목별 도소매 자료에서 품목명과 품목코드를 확인합니다.",
+      inputSchema: {
+        product_class: z.enum(["01", "02"]).optional(),
+        crop_name: z.string().optional()
+      }
+    },
+    async (args) => {
+      const data = await kamisRequest("dailySalesList");
+      const prices = Array.isArray(data?.price) ? data.price : [];
+      const filtered = prices.filter((row) => {
+        const cls = String(row.product_cls_code ?? row.productclscode ?? "");
+        const name = row.item_name ?? row.productName ?? row.productname ?? "";
+        return (!args.product_class || cls === args.product_class)
+          && (!args.crop_name || normalizeName(name).includes(normalizeName(args.crop_name)));
+      }).map((row) => ({
+        product_class: row.product_cls_code ?? row.productclscode ?? null,
+        category_code: row.category_code ?? row.categorycode ?? null,
+        category_name: row.category_name ?? row.categoryname ?? null,
+        item_name: row.item_name ?? row.productName ?? row.productname ?? null,
+        item_code: row.productno ?? row.itemcode ?? row.item_code ?? null,
+        unit: row.unit ?? null
+      }));
+      return { content: [{ type: "text", text: JSON.stringify(filtered, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
     "kamis_period_wholesale_prices",
     {
       title: "KAMIS 기간별 도매가격 조회",
