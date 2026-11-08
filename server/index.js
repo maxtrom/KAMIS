@@ -69,6 +69,12 @@ const KAMIS_ITEMS_BY_CODE = {
     { kind_code: "02", kind_name: "쪽파", wholesale_unit: "1kg", wholesale_grades: ["04","05"], retail_unit: "1kg", retail_grades: ["04","05"] }
   ] }
 };
+function resolveGradeRank(input) {
+  const value = normalizeName(input ?? "중품");
+  const map = { "상품": "1", "중품": "2", "하품": "3", "1": "1", "2": "2", "3": "3" };
+  if (!map[value]) throw new Error(`등급 '${input}'을(를) 인식하지 못했습니다. 상품/중품/하품 또는 1/2/3을 사용하세요.`);
+  return map[value];
+}
 function resolveCrop(input, explicitKind, categoryCode = "200") {
   const raw = String(input ?? "").trim();
   if (!raw) throw new Error("품목명 또는 KAMIS 품목코드를 지정하세요.");
@@ -183,15 +189,14 @@ function makeServer() {
         p_itemcategorycode: resolved.category_code,
         p_itemcode: resolved.item_code,
         p_kindcode: resolved.kind_code,
-        p_graderank: args.grade_rank,
+        p_graderank: resolveGradeRank(args.grade_rank),
         p_countycode: args.county_code,
         p_convert_kg_yn: args.convert_kg_yn
       });
       if (Array.isArray(data.price)) {
         data.price = data.price.filter((p) => String(p.productclscode) === args.product_cls_code);
       }
-      const captionText = (data.price || []).map(p => String(p.caption ?? "")).join(" | ");
-      const notes = [`품목 매핑: ${resolved.item_name}(${resolved.item_code}) / 품종 ${resolved.kind_name}(${resolved.kind_code}) / ${args.product_cls_code === "02" ? "도매·중도매" : "소매"} / ${args.grade_rank === "2" ? "중품" : args.grade_rank === "1" ? "상품" : "하품"}`];
+      const notes = [`품목 매핑: ${resolved.item_name}(${resolved.item_code}) / 품종 ${resolved.kind_name}(${resolved.kind_code}) / ${args.product_cls_code === "02" ? "도매·중도매" : "소매"} / ${resolveGradeRank(args.grade_rank) === "2" ? "중품" : resolveGradeRank(args.grade_rank) === "1" ? "상품" : "하품"}`];
       if (!Array.isArray(data.price) || data.price.length === 0) {
         return { content: [{ type: "text", text: JSON.stringify({ message: "해당 조건의 가격자료가 없습니다.", requested: { year: args.year, item: requested, item_code: resolved.item_code, kind_code: resolved.kind_code, grade_rank: args.grade_rank, product_cls_code: args.product_cls_code }, response: sanitizeKamisData(data) }, null, 2) }] };
       }
@@ -202,30 +207,15 @@ function makeServer() {
   server.registerTool(
     "kamis_item_codes",
     {
-      title: "KAMIS 품목코드 목록 조회",
-      description: "KAMIS 최근 품목별 도소매 자료에서 품목명과 품목코드를 확인합니다.",
-      inputSchema: {
-        product_class: z.enum(["01", "02"]).optional(),
-        crop_name: z.string().optional()
-      }
+      title: "KAMIS 내장 품목코드 목록",
+      description: "제공된 MCPB 1.3.0 코드표에서 양파·파/대파·쪽파·양배추의 품목 및 품종 코드를 조회합니다. KAMIS API 호출 없이 반환합니다.",
+      inputSchema: { crop_name: z.string().optional() }
     },
-    async (args) => {
-      const data = await kamisRequest("dailySalesList");
-      const prices = Array.isArray(data?.price) ? data.price : [];
-      const filtered = prices.filter((row) => {
-        const cls = String(row.product_cls_code ?? row.productclscode ?? "");
-        const name = row.item_name ?? row.productName ?? row.productname ?? "";
-        return (!args.product_class || cls === args.product_class)
-          && (!args.crop_name || normalizeName(name).includes(normalizeName(args.crop_name)));
-      }).map((row) => ({
-        product_class: row.product_cls_code ?? row.productclscode ?? null,
-        category_code: row.category_code ?? row.categorycode ?? null,
-        category_name: row.category_name ?? row.categoryname ?? null,
-        item_name: row.item_name ?? row.productName ?? row.productname ?? null,
-        item_code: row.productno ?? row.itemcode ?? row.item_code ?? null,
-        unit: row.unit ?? null
-      }));
-      return { content: [{ type: "text", text: JSON.stringify(filtered, null, 2) }] };
+    async ({ crop_name }) => {
+      const rows = Object.entries(KAMIS_CROPS)
+        .filter(([name]) => !crop_name || normalizeName(name).includes(normalizeName(crop_name)) || normalizeName(crop_name).includes(normalizeName(name)))
+        .map(([name, v]) => ({ query_name: name, ...v }));
+      return { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };
     }
   );
 
