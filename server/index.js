@@ -44,26 +44,26 @@ function normalizeName(value) {
 }
 
 async function resolveKamisItemCode(cropName, categoryCode = "200") {
-  const listing = await kamisRequest("dailyPriceByCategoryList", {
-    p_product_cls_code: "02",
-    p_item_category_code: categoryCode,
-    p_convert_kg_yn: "Y"
-  });
-  const rows = Array.isArray(listing?.data) ? listing.data : [];
-  const matches = rows.filter((row) => {
-    const name = row.item_name ?? row.itemName ?? row.itemname ?? "";
-    return normalizeName(name) === normalizeName(cropName);
+  // KAMIS official dailySalesList exposes the item names and product numbers.
+  const listing = await kamisRequest("dailySalesList");
+  const prices = Array.isArray(listing?.price) ? listing.price : [];
+  const matches = prices.filter((row) => {
+    const name = row.item_name ?? row.productName ?? row.productname ?? "";
+    const category = String(row.category_code ?? row.categorycode ?? "");
+    return normalizeName(name) === normalizeName(cropName)
+      && (!category || category === String(categoryCode));
   });
   if (matches.length !== 1) {
-    const available = rows.map((row) => ({
-      item_name: row.item_name ?? row.itemName ?? row.itemname ?? null,
-      item_code: row.itemcode ?? row.item_code ?? row.itemCode ?? null
+    const available = prices.map((row) => ({
+      item_name: row.item_name ?? row.productName ?? row.productname ?? null,
+      item_code: row.productno ?? row.itemcode ?? row.item_code ?? null,
+      category_code: row.category_code ?? row.categorycode ?? null
     })).filter((row) => row.item_name);
     throw new Error(matches.length
-      ? `품목명 '${cropName}'의 코드가 여러 개입니다. 품종을 지정해야 합니다.`
-      : `KAMIS 품목 목록에서 '${cropName}'을(를) 찾지 못했습니다. 품목코드표를 확인하세요. 반환된 품목 수: ${rows.length}`);
+      ? `품목명 '${cropName}'의 코드가 여러 개입니다. KAMIS 품목코드표에서 부류/품종을 추가로 지정해야 합니다.`
+      : `KAMIS 최근 품목목록에서 '${cropName}'을(를) 찾지 못했습니다. 반환된 품목 수: ${available.length}`);
   }
-  const code = matches[0].itemcode ?? matches[0].item_code ?? matches[0].itemCode;
+  const code = matches[0].productno ?? matches[0].itemcode ?? matches[0].item_code;
   if (!code) throw new Error(`KAMIS 품목 '${cropName}' 응답에 품목코드가 없습니다.`);
   return String(code);
 }
