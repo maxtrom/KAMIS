@@ -40,7 +40,7 @@ function sanitizeKamisData(value) {
 }
 
 function normalizeName(value) {
-  return String(value ?? "").replace(/\\s+/g, "").replace(/[·ㆍ]/g, "").toLowerCase();
+  return String(value ?? "").replace(/\s+/g, "").replace(/[·ㆍ]/g, "").toLowerCase();
 }
 
 async function resolveKamisItemCode(cropName, categoryCode = "200") {
