@@ -43,6 +43,65 @@ function normalizeName(value) {
   return String(value ?? "").replace(/\s+/g, "").replace(/[·ㆍ]/g, "").toLowerCase();
 }
 
+/*
+ * Official KAMIS item/kind mapping extracted from the supplied MCPB 1.3.0
+ * bundled code table (server/data/codes.json).
+ * KAMIS item code and kind code are separate dimensions:
+ * 245=양파, 246=파(00=대파, 02=쪽파), 212=양배추.
+ */
+const KAMIS_CROPS = {
+  "양파": { item_code: "245", item_name: "양파", kind_code: "00", kind_name: "양파", category_code: "200" },
+  "햇양파": { item_code: "245", item_name: "양파", kind_code: "02", kind_name: "햇양파", category_code: "200" },
+  "파": { item_code: "246", item_name: "파", kind_code: "00", kind_name: "대파", category_code: "200" },
+  "대파": { item_code: "246", item_name: "파", kind_code: "00", kind_name: "대파", category_code: "200" },
+  "쪽파": { item_code: "246", item_name: "파", kind_code: "02", kind_name: "쪽파", category_code: "200" },
+  "양배추": { item_code: "212", item_name: "양배추", kind_code: "00", kind_name: "양배추", category_code: "200" }
+};
+const KAMIS_ITEMS_BY_CODE = {
+  "212": { item_name: "양배추", category_code: "200", kinds: [{ kind_code: "00", kind_name: "양배추", wholesale_unit: "8kg", wholesale_grades: ["04","05"], retail_unit: "1포기", retail_grades: ["04","05"] }] },
+  "245": { item_name: "양파", category_code: "200", kinds: [
+    { kind_code: "00", kind_name: "양파", wholesale_unit: "15kg", wholesale_grades: ["04","05"], retail_unit: "1kg", retail_grades: ["04","05"] },
+    { kind_code: "02", kind_name: "햇양파", wholesale_unit: "15kg", wholesale_grades: ["04","05"], retail_unit: "1kg", retail_grades: ["04","05"] },
+    { kind_code: "10", kind_name: "수입", wholesale_unit: "20kg", wholesale_grades: [], retail_unit: "1kg", retail_grades: ["05"] }
+  ] },
+  "246": { item_name: "파", category_code: "200", kinds: [
+    { kind_code: "00", kind_name: "대파", wholesale_unit: "1kg", wholesale_grades: ["04","05"], retail_unit: "1kg", retail_grades: ["04","05"] },
+    { kind_code: "02", kind_name: "쪽파", wholesale_unit: "1kg", wholesale_grades: ["04","05"], retail_unit: "1kg", retail_grades: ["04","05"] }
+  ] }
+};
+function resolveCrop(input, explicitKind, categoryCode = "200") {
+  const raw = String(input ?? "").trim();
+  if (!raw) throw new Error("품목명 또는 KAMIS 품목코드를 지정하세요.");
+  let item = KAMIS_CROPS[normalizeName(raw)];
+  if (!item && KAMIS_ITEMS_BY_CODE[raw]) {
+    const parent = KAMIS_ITEMS_BY_CODE[raw];
+    // 파는 품종이 생략되면 기본 품종을 대파(00)로 선택합니다.
+    const preferred = parent.kinds.find(k => normalizeName(k.kind_name) === "대파")
+      ?? parent.kinds[0];
+    item = { item_code: raw, item_name: parent.item_name, kind_code: preferred?.kind_code, kind_name: preferred?.kind_name, category_code: parent.category_code };
+  }
+  if (!item && /^\d+$/.test(raw)) {
+    throw new Error(`품목코드 '${raw}'는 제공된 MCPB 코드표의 지원 품목에 없습니다. kamis_find_item 또는 공식 KAMIS 코드표로 확인하세요.`);
+  }
+  if (!item) throw new Error(`품목 '${raw}'은 제공된 MCPB 코드표에서 찾지 못했습니다. 현재 내장 매핑: 양파, 햇양파, 파, 대파, 쪽파, 양배추`);
+  const parent = KAMIS_ITEMS_BY_CODE[item.item_code];
+  let kindCode = item.kind_code;
+  let kindName = item.kind_name;
+  if (explicitKind) {
+    const kindRaw = String(explicitKind).trim();
+    const kind = parent?.kinds.find(k => k.kind_code === kindRaw || normalizeName(k.kind_name) === normalizeName(kindRaw));
+    if (!kind) throw new Error(`${item.item_name}의 품종 '${kindRaw}'을(를) 찾지 못했습니다. 가능한 품종: ${(parent?.kinds ?? []).map(k => k.kind_name + "(" + k.kind_code + ")").join(", ")}`);
+    kindCode = kind.kind_code;
+    kindName = kind.kind_name;
+  }
+  if (normalizeName(raw) === "파" && !explicitKind) {
+    kindCode = "00";
+    kindName = "대파";
+  }
+  if (!kindCode) throw new Error(`${item.item_name}의 품종을 결정할 수 없습니다.`);
+  return { ...item, kind_code: kindCode, kind_name: kindName, category_code: categoryCode || item.category_code };
+}
+
 async function resolveKamisItemCode(cropName, categoryCode = "200") {
   const listing = await kamisRequest("dailySalesList");
   const prices = Array.isArray(listing?.price) ? listing.price : [];
@@ -101,31 +160,29 @@ function makeServer() {
     "kamis_monthly_prices",
     {
       title: "KAMIS 월별 도소매 가격 조회",
-      description: "KAMIS 월별 도소매 가격을 조회합니다. 중도매 가격은 product_cls_code=02, 소매는 01입니다. kg 환산은 convert_kg_yn=Y로 요청하세요.",
+      description: "MCPB 1.3.0 내장 KAMIS 품목·품종 코드표를 사용합니다. 품목명만 입력하면 품목과 품종을 함께 결정합니다. 특히 '파' 또는 '대파'는 품목 파(246)+품종 대파(00), '쪽파'는 파(246)+품종 쪽파(02)로 조회합니다. 중도매 도매=02, 소매=01. 등급은 상품=1, 중품=2, 하품=3. kg 환산 기본 Y.",
       inputSchema: {
-        year: z.string().regex(/^\d{4}$/).describe("조회 연도 예: 2026"),
+        year: z.string().regex(/^\\d{4}$/).describe("조회 연도 예: 2026"),
         period: z.string().default("1").describe("조회 기간(년), 기본 1"),
-        category_code: z.string().default("200").describe("부류 코드: 100 식량작물, 200 채소류, 300 특용작물, 400 과일류, 500 축산물, 600 수산물"),
-        item_code: z.string().optional().describe("품목 코드. crop_name을 입력하면 KAMIS 품목목록에서 자동 확인합니다."),
-        crop_name: z.string().optional().describe("품목명(예: 양파, 대파, 양배추). item_code 대신 지정 가능"),
-        kind_code: z.string().optional().describe("품종 코드"),
-        grade_rank: z.string().optional().describe("등급 코드: 상품/중품 등 KAMIS 코드표 기준"),
-        county_code: z.string().optional().describe("지역 코드. 미입력 시 전체 지역"),
-        product_cls_code: z.enum(["01", "02"]).default("02").describe("01 소매, 02 도매"),
+        category_code: z.string().default("200").describe("부류 코드"),
+        item_code: z.string().optional().describe("품목 코드 또는 품목명. crop_name 대신 사용 가능"),
+        crop_name: z.string().optional().describe("품목 또는 품종명(예: 양파, 파, 대파, 쪽파, 양배추)"),
+        kind_code: z.string().optional().describe("품종 코드 또는 이름. 생략 시 내장 코드표 기본 품종 사용"),
+        grade_rank: z.string().default("2").describe("등급: 1 상품, 2 중품, 3 하품. 기본 중품"),
+        county_code: z.string().optional().describe("지역 코드. 미입력 시 전국 평균"),
+        product_cls_code: z.enum(["01", "02"]).default("02").describe("01 소매, 02 도매(중도매)"),
         convert_kg_yn: z.enum(["Y", "N"]).default("Y").describe("kg 단위 환산 여부")
       }
     },
     async (args) => {
-      const resolvedItemCode = args.item_code || (args.crop_name
-        ? await resolveKamisItemCode(args.crop_name, args.category_code)
-        : undefined);
-      if (!resolvedItemCode) throw new Error("item_code 또는 crop_name을 지정하세요.");
+      const requested = args.crop_name || args.item_code;
+      const resolved = resolveCrop(requested, args.kind_code, args.category_code);
       const data = await kamisRequest("monthlySalesList", {
         p_yyyy: args.year,
         p_period: args.period,
-        p_itemcategorycode: args.category_code,
-        p_itemcode: resolvedItemCode,
-        p_kindcode: args.kind_code,
+        p_itemcategorycode: resolved.category_code,
+        p_itemcode: resolved.item_code,
+        p_kindcode: resolved.kind_code,
         p_graderank: args.grade_rank,
         p_countycode: args.county_code,
         p_convert_kg_yn: args.convert_kg_yn
@@ -133,15 +190,12 @@ function makeServer() {
       if (Array.isArray(data.price)) {
         data.price = data.price.filter((p) => String(p.productclscode) === args.product_cls_code);
       }
-      if (args.crop_name) {
-        const verified = (data.price || []).filter((p) => normalizeName(p.caption).includes(normalizeName(args.crop_name)));
-        if (!verified.length && Array.isArray(data.price) && data.price.length) {
-          const returned = data.price.map((p) => p.caption);
-          throw new Error(`요청 품목 '${args.crop_name}'과 API 응답 품목명이 일치하지 않습니다. 응답: ${returned.join(" | ")}`);
-        }
-        data.price = verified;
+      const captionText = (data.price || []).map(p => String(p.caption ?? "")).join(" | ");
+      const notes = [`품목 매핑: ${resolved.item_name}(${resolved.item_code}) / 품종 ${resolved.kind_name}(${resolved.kind_code}) / ${args.product_cls_code === "02" ? "도매·중도매" : "소매"} / ${args.grade_rank === "2" ? "중품" : args.grade_rank === "1" ? "상품" : "하품"}`];
+      if (!Array.isArray(data.price) || data.price.length === 0) {
+        return { content: [{ type: "text", text: JSON.stringify({ message: "해당 조건의 가격자료가 없습니다.", requested: { year: args.year, item: requested, item_code: resolved.item_code, kind_code: resolved.kind_code, grade_rank: args.grade_rank, product_cls_code: args.product_cls_code }, response: sanitizeKamisData(data) }, null, 2) }] };
       }
-      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: "text", text: notes.join("\\n") + "\\n" + JSON.stringify(sanitizeKamisData(data), null, 2) }] };
     }
   );
 
@@ -222,6 +276,36 @@ function makeServer() {
         p_regday: args.date
       });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
+    "kamis_find_item",
+    {
+      title: "KAMIS 품목·품종 검색",
+      description: "제공된 MCPB 코드표 기준으로 품목명과 품종명을 검색합니다. '대파'는 파(246)+대파(00)로 안내합니다.",
+      inputSchema: { query: z.string() }
+    },
+    async ({ query }) => {
+      const q = normalizeName(query);
+      const rows = Object.entries(KAMIS_CROPS)
+        .filter(([name]) => normalizeName(name).includes(q) || q.includes(normalizeName(name)))
+        .map(([name, v]) => ({ query_name: name, ...v }));
+      return { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
+    "kamis_item_kinds",
+    {
+      title: "KAMIS 품목별 품종·단위·등급 조회",
+      description: "품목코드 또는 품목명에 연결된 품종, 도매·소매 단위와 등급을 보여줍니다.",
+      inputSchema: { item: z.string() }
+    },
+    async ({ item }) => {
+      const resolved = resolveCrop(item, undefined, "200");
+      const row = KAMIS_ITEMS_BY_CODE[resolved.item_code];
+      return { content: [{ type: "text", text: JSON.stringify({ item_code: resolved.item_code, item_name: resolved.item_name, kinds: row.kinds }, null, 2) }] };
     }
   );
 
