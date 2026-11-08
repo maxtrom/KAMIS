@@ -21,7 +21,7 @@ function sanitizeKamisData(value) {
   const { certId, certKey } = credentials();
   const secretStrings = [certId, certKey].filter(Boolean);
   const walk = (input, key = "") => {
-    if (/^condition$/i.test(key) || /cert.?key|cert.?id/i.test(key)) return undefined;
+    if (/^condition$/i.test(key) || /cert.?key|cert.?id/i.test(key) || /^p_(key|id)$/i.test(key)) return undefined;
     if (Array.isArray(input)) return input.map((v) => walk(v)).filter((v) => v !== undefined);
     if (input && typeof input === "object") {
       const out = {};
@@ -128,11 +128,35 @@ async function kamisRequest(action, params = {}) {
     }
   }
 
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!response.ok) throw new Error(`KAMIS API HTTP 오류: ${response.status}`);
-  const data = await response.json();
-
-  const resultCode = data?.condition?.result_code ?? data?.result_code;
+  const timeout = action.startsWith("period") ? 60000 : 25000;
+  let data;
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: { Accept: "application/json", "User-Agent": "kamis-render-mcp/1.1" },
+        signal: AbortSignal.timeout(timeout)
+      });
+      if (!response.ok) {
+        const error = new Error(`KAMIS API HTTP 오류: ${response.status}`);
+        error.retryable = response.status >= 500;
+        throw error;
+      }
+      data = await response.json();
+      lastError = null;
+      break;
+    } catch (error) {
+      lastError = error;
+      if (attempt > 0 || error.name === "TimeoutError" || error.retryable === false) break;
+      if (error.message?.startsWith("KAMIS API HTTP") && !error.retryable) break;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  if (lastError) {
+    if (lastError.name === "TimeoutError") throw new Error("KAMIS 응답 시간 초과: 조회 조건이나 기간을 줄여 다시 시도하세요.");
+    throw lastError;
+  }
+  const resultCode = data?.condition?.result_code ?? data?.result_code ?? data?.error_code;
   if (resultCode && !["000", "001"].includes(String(resultCode))) {
     const message = data?.condition?.result_msg ?? data?.condition?.message ?? "KAMIS API 요청 오류";
     throw new Error(`KAMIS 오류 ${resultCode}: ${message}`);
