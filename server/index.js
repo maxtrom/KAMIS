@@ -114,31 +114,6 @@ function resolveCrop(input, explicitKind, categoryCode = "200") {
   return { ...item, kind_code: kindCode, kind_name: kindName, category_code: categoryCode || item.category_code };
 }
 
-async function resolveKamisItemCode(cropName, categoryCode = "200") {
-  const listing = await kamisRequest("dailySalesList");
-  const prices = Array.isArray(listing?.price) ? listing.price : [];
-  const rows = prices.filter((row) => {
-    const name = row.item_name ?? row.productName ?? row.productname ?? "";
-    const category = String(row.category_code ?? row.categorycode ?? "");
-    return (!category || category === String(categoryCode))
-      && normalizeName(name.split("/")[0]) === normalizeName(cropName);
-  });
-  const matches = rows;
-  if (matches.length !== 1) {
-    const available = prices.map((row) => ({
-      item_name: row.item_name ?? row.productName ?? row.productname ?? null,
-      item_code: row.productno ?? row.itemcode ?? row.item_code ?? null,
-      category_code: row.category_code ?? row.categorycode ?? null
-    })).filter((row) => row.item_name);
-    throw new Error(matches.length
-      ? `품목명 '${cropName}'에 해당하는 코드가 여러 개입니다. 더 구체적인 품목명을 지정하세요.`
-      : `KAMIS 최근 품목목록에서 '${cropName}'을(를) 찾지 못했습니다. 반환된 품목 수: ${available.length}`);
-  }
-  const code = matches[0].productno ?? matches[0].itemcode ?? matches[0].item_code;
-  if (!code) throw new Error(`KAMIS 품목 '${cropName}' 응답에 품목코드가 없습니다.`);
-  return String(code);
-}
-
 async function kamisRequest(action, params = {}) {
   const { certId, certKey } = credentials();
   const url = new URL(API_URL);
