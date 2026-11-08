@@ -69,6 +69,12 @@ const KAMIS_ITEMS_BY_CODE = {
     { kind_code: "02", kind_name: "쪽파", wholesale_unit: "1kg", wholesale_grades: ["04","05"], retail_unit: "1kg", retail_grades: ["04","05"] }
   ] }
 };
+function resolveProductRank(input) {
+  const value = normalizeName(input ?? "중품");
+  const map = { "상품": "04", "중품": "05", "하품": "06", "1": "04", "2": "05", "3": "06", "04": "04", "05": "05", "06": "06" };
+  if (!map[value]) throw new Error(`도매 등급 '${input}'을(를) 인식하지 못했습니다. 상품/중품/하품을 사용하세요.`);
+  return map[value];
+}
 function resolveGradeRank(input) {
   const value = normalizeName(input ?? "중품");
   const map = { "상품": "1", "중품": "2", "하품": "3", "1": "1", "2": "2", "3": "3" };
@@ -223,26 +229,29 @@ function makeServer() {
     "kamis_period_wholesale_prices",
     {
       title: "KAMIS 기간별 도매가격 조회",
-      description: "시작일과 종료일 사이의 품목별 도매가격을 조회합니다. 조회 기간은 최대 1년입니다.",
+      description: "기간별 도매(중도매) 가격을 조회합니다. 품목명만 입력하면 내장 코드표로 품목·품종을 자동 결정합니다. '파'/'대파'는 파(246)+대파(00), '쪽파'는 파(246)+쪽파(02)입니다. 등급 기본값은 중품, 지역 기본값은 서울입니다.",
       inputSchema: {
-        start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        region_code: z.string().optional().describe("도매 지역 코드: 1101 서울, 2100 부산, 2200 대구, 2401 광주, 2501 대전. 미입력 시 전체"),
-        item_code: z.string().optional(),
-        kind_code: z.string().optional(),
-        grade_rank: z.string().optional()
+        start_date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+        end_date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+        region_code: z.string().optional().describe("도매 지역 코드: 1101 서울, 2100 부산, 2200 대구, 2401 광주, 2501 대전. 미입력 시 서울"),
+        item_code: z.string().optional().describe("KAMIS 품목코드 또는 품목명"),
+        crop_name: z.string().optional().describe("품목 또는 품종명(양파, 파, 대파, 쪽파, 양배추)"),
+        kind_code: z.string().optional().describe("품종 코드 또는 이름"),
+        grade_rank: z.string().default("중품").describe("상품/중품/하품 또는 1/2/3")
       }
     },
     async (args) => {
+      const resolved = resolveCrop(args.crop_name || args.item_code, args.kind_code, "200");
       const data = await kamisRequest("periodWholesaleProductList", {
         p_startday: args.start_date,
         p_endday: args.end_date,
-        p_countrycode: args.region_code,
-        p_itemcode: args.item_code,
-        p_kindcode: args.kind_code,
-        p_graderank: args.grade_rank
+        p_countrycode: args.region_code || "1101",
+        p_itemcategorycode: resolved.category_code,
+        p_itemcode: resolved.item_code,
+        p_kindcode: resolved.kind_code,
+        p_productrankcode: resolveProductRank(args.grade_rank)
       });
-      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify(sanitizeKamisData(data), null, 2) }] };
     }
   );
 
