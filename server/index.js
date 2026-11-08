@@ -6,8 +6,6 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 const app = express();
 // Render terminates TLS and forwards the client address through one proxy hop.
 app.set("trust proxy", 1);
-app.use(express.json({ limit: "64kb", strict: true }));
-
 // Per-client limits for the public MCP endpoint: 10 requests / 10 seconds
 // and 30 requests / 60 seconds. In-memory by design for this single-instance
 // deployment; use a shared store (e.g. Redis) before scaling to multiple instances.
@@ -82,6 +80,10 @@ function mcpRateLimit(req, res, next) {
   });
   next();
 }
+
+// Apply throttling before parsing request bodies to protect parser resources.
+app.use("/mcp", mcpRateLimit);
+app.use(express.json({ limit: "64kb", strict: true }));
 
 const API_URL = "https://www.kamis.or.kr/service/price/xml.do";
 
@@ -454,8 +456,6 @@ function makeServer() {
 
 app.get("/health", (_req, res) => res.status(200).json({ status: "ok", service: "kamis-mcp-server" }));
 app.get("/", (_req, res) => res.status(200).send("KAMIS MCP server is running. MCP endpoint: /mcp"));
-
-app.use("/mcp", mcpRateLimit);
 
 app.options("/mcp", (_req, res) => {
   res.set({
