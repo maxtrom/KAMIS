@@ -168,7 +168,7 @@ function makeServer() {
       title: "KAMIS 월별 도소매 가격 조회",
       description: "MCPB 1.3.0 내장 KAMIS 품목·품종 코드표를 사용합니다. 품목명만 입력하면 품목과 품종을 함께 결정합니다. 특히 '파' 또는 '대파'는 품목 파(246)+품종 대파(00), '쪽파'는 파(246)+품종 쪽파(02)로 조회합니다. 중도매 도매=02, 소매=01. 등급은 상품=1, 중품=2, 하품=3. kg 환산 기본 Y.",
       inputSchema: {
-        year: z.string().regex(/^\\d{4}$/).describe("조회 연도 예: 2026"),
+        year: z.string().regex(/^\d{4}$/).describe("조회 연도 예: 2026"),
         period: z.string().default("1").describe("조회 기간(년), 기본 1"),
         category_code: z.string().default("200").describe("부류 코드"),
         item_code: z.string().optional().describe("품목 코드 또는 품목명. crop_name 대신 사용 가능"),
