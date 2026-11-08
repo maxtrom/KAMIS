@@ -106,7 +106,8 @@ function makeServer() {
         year: z.string().regex(/^\d{4}$/).describe("조회 연도 예: 2026"),
         period: z.string().default("1").describe("조회 기간(년), 기본 1"),
         category_code: z.string().default("200").describe("부류 코드: 100 식량작물, 200 채소류, 300 특용작물, 400 과일류, 500 축산물, 600 수산물"),
-        item_code: z.string().optional().describe("품목 코드. crop_name을 입력하면 KAMIS 품목목록에서 자동 확인합니다."),\n        crop_name: z.string().optional().describe("품목명(예: 양파, 대파, 양배추). item_code 대신 지정 가능"),
+        item_code: z.string().optional().describe("품목 코드. crop_name을 입력하면 KAMIS 품목목록에서 자동 확인합니다."),
+        crop_name: z.string().optional().describe("품목명(예: 양파, 대파, 양배추). item_code 대신 지정 가능"),
         kind_code: z.string().optional().describe("품종 코드"),
         grade_rank: z.string().optional().describe("등급 코드: 상품/중품 등 KAMIS 코드표 기준"),
         county_code: z.string().optional().describe("지역 코드. 미입력 시 전체 지역"),
@@ -115,6 +116,10 @@ function makeServer() {
       }
     },
     async (args) => {
+      const resolvedItemCode = args.item_code || (args.crop_name
+        ? await resolveKamisItemCode(args.crop_name, args.category_code)
+        : undefined);
+      if (!resolvedItemCode) throw new Error("item_code 또는 crop_name을 지정하세요.");
       const data = await kamisRequest("monthlySalesList", {
         p_yyyy: args.year,
         p_period: args.period,
@@ -126,6 +131,15 @@ function makeServer() {
         p_productclscode: args.product_cls_code,
         p_convert_kg_yn: args.convert_kg_yn
       });
+      if (args.crop_name) {
+        const wholesale = (data.price || []).filter((p) => p.productclscode === "02");
+        const verified = wholesale.filter((p) => normalizeName(p.caption).includes(normalizeName(args.crop_name)));
+        if (!verified.length) {
+          const returned = wholesale.map((p) => p.caption);
+          throw new Error(`요청 품목 '${args.crop_name}'과 API 응답 품목명이 일치하지 않습니다. 응답: ${returned.join(" | ") || "가격자료 없음"}`);
+        }
+        data.price = verified;
+      }
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
   );
