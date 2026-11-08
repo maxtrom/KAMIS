@@ -4,7 +4,84 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 const app = express();
+// Render terminates TLS and forwards the client address through one proxy hop.
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "64kb", strict: true }));
+
+// Per-client limits for the public MCP endpoint: 10 requests / 10 seconds
+// and 30 requests / 60 seconds. In-memory by design for this single-instance
+// deployment; use a shared store (e.g. Redis) before scaling to multiple instances.
+const MCP_BURST_LIMIT = 10;
+const MCP_BURST_WINDOW_MS = 10_000;
+const MCP_MINUTE_LIMIT = 30;
+const MCP_MINUTE_WINDOW_MS = 60_000;
+const mcpRequestBuckets = new Map();
+let mcpRequestCount = 0;
+
+function mcpRateLimit(req, res, next) {
+  if (req.method === "OPTIONS") return next();
+
+  const now = Date.now();
+  const clientIp = req.ip || req.socket.remoteAddress || "unknown";
+  let bucket = mcpRequestBuckets.get(clientIp);
+  if (!bucket) {
+    bucket = { burstStart: now, burstCount: 0, minuteStart: now, minuteCount: 0 };
+  }
+
+  if (now - bucket.burstStart >= MCP_BURST_WINDOW_MS) {
+    bucket.burstStart = now;
+    bucket.burstCount = 0;
+  }
+  if (now - bucket.minuteStart >= MCP_MINUTE_WINDOW_MS) {
+    bucket.minuteStart = now;
+    bucket.minuteCount = 0;
+  }
+
+  const burstExceeded = bucket.burstCount >= MCP_BURST_LIMIT;
+  const minuteExceeded = bucket.minuteCount >= MCP_MINUTE_LIMIT;
+  if (burstExceeded || minuteExceeded) {
+    const retryMs = burstExceeded
+      ? MCP_BURST_WINDOW_MS - (now - bucket.burstStart)
+      : MCP_MINUTE_WINDOW_MS - (now - bucket.minuteStart);
+    res.set({
+      "Retry-After": String(Math.max(1, Math.ceil(retryMs / 1000))),
+      "X-RateLimit-Limit": String(MCP_MINUTE_LIMIT),
+      "X-RateLimit-Remaining": "0",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Expose-Headers": "Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining"
+    });
+    return res.status(429).json({
+      error: "요청 한도를 초과했습니다. 잠시 후 다시 시도하세요.",
+      retry_after_seconds: Math.max(1, Math.ceil(retryMs / 1000))
+    });
+  }
+
+  bucket.burstCount += 1;
+  bucket.minuteCount += 1;
+  mcpRequestBuckets.delete(clientIp);
+  mcpRequestBuckets.set(clientIp, bucket);
+
+  // Bound memory use and periodically remove expired client entries.
+  mcpRequestCount += 1;
+  if (mcpRequestCount % 256 === 0) {
+    for (const [ip, entry] of mcpRequestBuckets) {
+      const burstExpired = now - entry.burstStart >= MCP_BURST_WINDOW_MS;
+      const minuteExpired = now - entry.minuteStart >= MCP_MINUTE_WINDOW_MS;
+      if (burstExpired && minuteExpired) mcpRequestBuckets.delete(ip);
+    }
+  }
+  while (mcpRequestBuckets.size > 10_000) {
+    mcpRequestBuckets.delete(mcpRequestBuckets.keys().next().value);
+  }
+
+  res.set({
+    "X-RateLimit-Limit": String(MCP_MINUTE_LIMIT),
+    "X-RateLimit-Remaining": String(Math.max(0, MCP_MINUTE_LIMIT - bucket.minuteCount)),
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Expose-Headers": "Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining"
+  });
+  next();
+}
 
 const API_URL = "https://www.kamis.or.kr/service/price/xml.do";
 
@@ -377,6 +454,8 @@ function makeServer() {
 
 app.get("/health", (_req, res) => res.status(200).json({ status: "ok", service: "kamis-mcp-server" }));
 app.get("/", (_req, res) => res.status(200).send("KAMIS MCP server is running. MCP endpoint: /mcp"));
+
+app.use("/mcp", mcpRateLimit);
 
 app.options("/mcp", (_req, res) => {
   res.set({
