@@ -4,7 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "64kb", strict: true }));
 
 const API_URL = "https://www.kamis.or.kr/service/price/xml.do";
 
@@ -268,10 +268,11 @@ function makeServer() {
     },
     async (args) => {
       const data = await kamisRequest("dailyPriceByCategoryList", {
-        p_product_cls_code: args.product_class,
-        p_item_category_code: args.category_code,
-        p_country_code: args.region_code,
-        p_regday: args.date
+        p_productclscode: args.product_class,
+        p_itemcategorycode: args.category_code,
+        p_countycode: args.region_code,
+        p_regday: args.date,
+        p_convert_kg_yn: "Y"
       });
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
