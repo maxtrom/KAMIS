@@ -232,7 +232,7 @@ function makeServer() {
       description: "기간별 도매(중도매) 가격을 조회합니다. 품목명만 입력하면 내장 코드표로 품목·품종을 자동 결정합니다. '파'/'대파'는 파(246)+대파(00), '쪽파'는 파(246)+쪽파(02)입니다. 등급 기본값은 중품, 지역 기본값은 서울입니다.",
       inputSchema: {
         start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        end_date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+        end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         region_code: z.string().optional().describe("도매 지역 코드: 1101 서울, 2100 부산, 2200 대구, 2401 광주, 2501 대전. 미입력 시 서울"),
         item_code: z.string().optional().describe("KAMIS 품목코드 또는 품목명"),
         crop_name: z.string().optional().describe("품목 또는 품종명(양파, 파, 대파, 쪽파, 양배추)"),
