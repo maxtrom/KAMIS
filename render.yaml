@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: kamis-mcp-server
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: KAMIS_CERT_ID
+        sync: false
+      - key: KAMIS_CERT_KEY
+        sync: false
