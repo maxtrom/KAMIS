@@ -205,7 +205,7 @@ function makeServer() {
       if (!Array.isArray(data.price) || data.price.length === 0) {
         return { content: [{ type: "text", text: JSON.stringify({ message: "해당 조건의 가격자료가 없습니다.", requested: { year: args.year, item: requested, item_code: resolved.item_code, kind_code: resolved.kind_code, grade_rank: args.grade_rank, product_cls_code: args.product_cls_code }, response: sanitizeKamisData(data) }, null, 2) }] };
       }
-      return { content: [{ type: "text", text: notes.join("\\n") + "\\n" + JSON.stringify(sanitizeKamisData(data), null, 2) }] };
+      return { content: [{ type: "text", text: notes.join("\n") + "\n" + JSON.stringify(sanitizeKamisData(data), null, 2) }] };
     }
   );
 
