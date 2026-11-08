@@ -267,20 +267,54 @@ function makeServer() {
       }
     },
     async (args) => {
-      const regday = args.date || new Intl.DateTimeFormat("en-CA", {
+      const today = new Intl.DateTimeFormat("en-CA", {
         timeZone: "Asia/Seoul",
         year: "numeric",
         month: "2-digit",
         day: "2-digit"
       }).format(new Date());
-      const data = await kamisRequest("dailyPriceByCategoryList", {
-        p_product_cls_code: args.product_class,
-        p_item_category_code: args.category_code,
-        p_country_code: args.region_code,
-        p_regday: regday,
-        p_convert_kg_yn: "Y"
+
+      // An omitted date means "latest available survey date", not necessarily today.
+      // KAMIS may return error 001 for a date with no survey, so step backward
+      // until a date with actual rows is found (up to 14 calendar days).
+      const datesToTry = args.date ? [args.date] : Array.from({ length: 15 }, (_, offset) => {
+        const [year, month, day] = today.split("-").map(Number);
+        const date = new Date(Date.UTC(year, month - 1, day - offset));
+        return date.toISOString().slice(0, 10);
       });
-      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+
+      let data;
+      let resolvedDate;
+      for (const regday of datesToTry) {
+        data = await kamisRequest("dailyPriceByCategoryList", {
+          p_product_cls_code: args.product_class,
+          p_item_category_code: args.category_code,
+          p_country_code: args.region_code,
+          p_regday: regday,
+          p_convert_kg_yn: "Y"
+        });
+        const payload = data?.data ?? data;
+        const rows = payload?.item ?? payload?.data?.item;
+        if (Array.isArray(rows) && rows.length > 0) {
+          resolvedDate = regday;
+          break;
+        }
+        if (args.date) break;
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            ...(data && typeof data === "object" ? data : { response: data }),
+            requested_date: args.date || today,
+            resolved_date: resolvedDate || args.date || null,
+            date_note: !args.date && resolvedDate && resolvedDate !== today
+              ? "오늘 조사자료가 없어 가장 최근 자료가 있는 날짜로 자동 조회했습니다."
+              : undefined
+          }, null, 2)
+        }]
+      };
     }
   );
 
