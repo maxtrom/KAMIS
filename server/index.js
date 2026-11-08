@@ -21,7 +21,7 @@ function sanitizeKamisData(value) {
   const { certId, certKey } = credentials();
   const secretStrings = [certId, certKey].filter(Boolean);
   const walk = (input, key = "") => {
-    if (/^condition$/i.test(key) || /cert.?key|cert.?id/i.test(key) || /^p_(key|id)$/i.test(key)) return undefined;
+    if (/^condition$/i.test(key) || /cert.?key|cert.?id|api.?key|secret|authorization/i.test(key) || /^p_(key|id)$/i.test(key)) return undefined;
     if (Array.isArray(input)) return input.map((v) => walk(v)).filter((v) => v !== undefined);
     if (input && typeof input === "object") {
       const out = {};
@@ -358,7 +358,7 @@ app.post("/mcp", async (req, res) => {
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
   } catch (error) {
-    console.error("MCP request failed:", error);
+    console.error("MCP request failed:", error?.name || "UnknownError");
     if (!res.headersSent) res.status(500).json({ error: "MCP request failed" });
   } finally {
     await transport.close().catch(() => {});
