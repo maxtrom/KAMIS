@@ -52,7 +52,7 @@ function makeServer() {
       title: "KAMIS 월별 도소매 가격 조회",
       description: "KAMIS 월별 도소매 가격을 조회합니다. 중도매 가격은 product_cls_code=02, 소매는 01입니다. kg 환산은 convert_kg_yn=Y로 요청하세요.",
       inputSchema: {
-        year: z.string().regex(/^\\d{4}$/).describe("조회 연도 예: 2026"),
+        year: z.string().regex(/^\d{4}$/).describe("조회 연도 예: 2026"),
         period: z.string().default("1").describe("조회 기간(년), 기본 1"),
         category_code: z.string().default("200").describe("부류 코드: 100 식량작물, 200 채소류, 300 특용작물, 400 과일류, 500 축산물, 600 수산물"),
         item_code: z.string().optional().describe("품목 코드"),
@@ -85,8 +85,8 @@ function makeServer() {
       title: "KAMIS 기간별 도매가격 조회",
       description: "시작일과 종료일 사이의 품목별 도매가격을 조회합니다. 조회 기간은 최대 1년입니다.",
       inputSchema: {
-        start_date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
-        end_date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+        start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         region_code: z.string().optional().describe("도매 지역 코드: 1101 서울, 2100 부산, 2200 대구, 2401 광주, 2501 대전. 미입력 시 전체"),
         item_code: z.string().optional(),
         kind_code: z.string().optional(),
