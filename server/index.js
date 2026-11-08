@@ -46,12 +46,13 @@ function normalizeName(value) {
 async function resolveKamisItemCode(cropName, categoryCode = "200") {
   const listing = await kamisRequest("dailySalesList");
   const prices = Array.isArray(listing?.price) ? listing.price : [];
-  const matches = prices.filter((row) => {
+  const rows = prices.filter((row) => {
     const name = row.item_name ?? row.productName ?? row.productname ?? "";
     const category = String(row.category_code ?? row.categorycode ?? "");
-    return normalizeName(name).includes(normalizeName(cropName))
-      && (!category || category === String(categoryCode));
+    return (!category || category === String(categoryCode))
+      && normalizeName(name.split("/")[0]) === normalizeName(cropName);
   });
+  const matches = rows;
   if (matches.length !== 1) {
     const available = prices.map((row) => ({
       item_name: row.item_name ?? row.productName ?? row.productname ?? null,
@@ -127,15 +128,16 @@ function makeServer() {
         p_kindcode: args.kind_code,
         p_graderank: args.grade_rank,
         p_countycode: args.county_code,
-        p_productclscode: args.product_cls_code,
         p_convert_kg_yn: args.convert_kg_yn
       });
+      if (Array.isArray(data.price)) {
+        data.price = data.price.filter((p) => String(p.productclscode) === args.product_cls_code);
+      }
       if (args.crop_name) {
-        const wholesale = (data.price || []).filter((p) => p.productclscode === "02");
-        const verified = wholesale.filter((p) => normalizeName(p.caption).includes(normalizeName(args.crop_name)));
-        if (!verified.length) {
-          const returned = wholesale.map((p) => p.caption);
-          throw new Error(`요청 품목 '${args.crop_name}'과 API 응답 품목명이 일치하지 않습니다. 응답: ${returned.join(" | ") || "가격자료 없음"}`);
+        const verified = (data.price || []).filter((p) => normalizeName(p.caption).includes(normalizeName(args.crop_name)));
+        if (!verified.length && Array.isArray(data.price) && data.price.length) {
+          const returned = data.price.map((p) => p.caption);
+          throw new Error(`요청 품목 '${args.crop_name}'과 API 응답 품목명이 일치하지 않습니다. 응답: ${returned.join(" | ")}`);
         }
         data.price = verified;
       }
