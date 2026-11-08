@@ -91,7 +91,7 @@ async function kamisRequest(action, params = {}) {
     const message = data?.condition?.result_msg ?? data?.condition?.message ?? "KAMIS API 요청 오류";
     throw new Error(`KAMIS 오류 ${resultCode}: ${message}`);
   }
-  return data;
+  return sanitizeKamisData(data);
 }
 
 function makeServer() {
